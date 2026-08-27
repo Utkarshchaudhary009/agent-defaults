@@ -4,18 +4,22 @@
 
 Build an API-first control plane for AI-agent configuration used by GitHub Actions and other automated clients.
 
-The platform centralizes decisions that would otherwise be duplicated across workflows: model/provider selection, libraries, skills, Markdown instructions, test definitions, execution settings, and other agent-environment configuration.
+Centralize model/provider selection, libraries, skills, Markdown instructions, test definitions, execution settings, and future agent-environment configuration behind versioned profiles.
 
-The core user experience should allow a client to request a named profile and receive one deterministic, versioned configuration snapshot.
+The core client flow is:
 
-The first concrete use case is eliminating duplicated model configuration across GitHub Actions: workflows depend on a profile such as `testing` or `coding`, while the central platform controls which model that profile currently resolves to.
+```text
+request profile → resolve version → receive one deterministic configuration snapshot
+```
+
+The first use case is removing duplicated model configuration from GitHub Actions.
 
 ## Source-of-Truth Principles
 
 - This plan is the implementation roadmap and verification contract.
-- Amend it before implementing material architectural or requirement changes.
-- A checkbox is only checked after the associated verification actually ran and passed.
-- Keep phases small enough that each can be implemented, tested, and committed independently.
+- Amend it before implementing material feature, architecture, technology, or verification changes.
+- `[x]` means the listed verification actually ran and passed.
+- Keep phases small enough to implement, verify, and commit independently.
 
 ---
 
@@ -23,33 +27,33 @@ The first concrete use case is eliminating duplicated model configuration across
 
 ## Goal
 
-Create the minimal TypeScript/Bun/Hono service foundation with Neon PostgreSQL connectivity, Drizzle migrations, validation, health checks, and a maintainable project structure.
+Create the minimal Bun + TypeScript + Hono service with Neon PostgreSQL, Drizzle, Zod, health checking, and project tooling.
 
 ## Tasks
 
 - [ ] Initialize the Bun + TypeScript project.
-- [ ] Add Hono as the HTTP framework.
-- [ ] Add Drizzle ORM and PostgreSQL/Neon database connectivity.
-- [ ] Add Zod for boundary validation.
-- [ ] Establish source directories for routes, domain services, database, auth, and configuration.
+- [ ] Add Hono.
+- [ ] Add Drizzle and Neon/PostgreSQL connectivity.
+- [ ] Add Zod for API-boundary validation.
+- [ ] Establish source directories for routes, services, database, auth, and configuration.
 - [ ] Add environment-variable validation without committing secrets.
-- [ ] Create a database migration workflow.
-- [ ] Add a basic `/health` endpoint.
-- [ ] Add lint/format and typecheck scripts.
-- [ ] Add the initial test setup with Vitest.
+- [ ] Create the migration workflow.
+- [ ] Add `/health`.
+- [ ] Add typecheck and lint/format scripts.
+- [ ] Add Vitest.
 
 ## Deliverable
 
-A runnable Hono API connected to Neon through a clean data-access layer, with a passing health endpoint and developer checks.
+A runnable Hono API with Neon connectivity and passing developer checks.
 
 ## Verification
 
 - [ ] Typecheck passes.
 - [ ] Lint/format checks pass.
 - [ ] Unit test suite passes.
-- [ ] Local API starts successfully.
+- [ ] API starts successfully.
 - [ ] `/health` returns the documented response.
-- [ ] Database connection and migration path are verified in a safe development environment.
+- [ ] Database connection and migration path work in a safe development environment.
 
 ---
 
@@ -57,34 +61,34 @@ A runnable Hono API connected to Neon through a clean data-access layer, with a 
 
 ## Goal
 
-Model projects, profiles, profile versions, and the reusable resources that profiles can reference.
+Model projects, profiles, immutable profile versions, and reusable agent resources.
 
 ## Tasks
 
-- [ ] Define project ownership and identity boundaries.
-- [ ] Define profiles as named resources within a project.
+- [ ] Define project ownership and isolation.
+- [ ] Define profiles within projects.
 - [ ] Define immutable profile versions.
-- [ ] Define models/providers.
-- [ ] Define libraries.
-- [ ] Define skills.
-- [ ] Define Markdown instructions/resources.
-- [ ] Define test/E2E definitions.
+- [ ] Define model/provider resources.
+- [ ] Define library resources.
+- [ ] Define skill resources.
+- [ ] Define Markdown instruction resources.
+- [ ] Define E2E test definitions.
 - [ ] Define profile-to-resource relationships.
 - [ ] Define audit-log storage for configuration mutations.
-- [ ] Add database constraints needed for uniqueness and isolation.
-- [ ] Create and test migrations.
+- [ ] Add uniqueness and isolation constraints.
+- [ ] Create migrations.
 
 ## Deliverable
 
-A normalized PostgreSQL schema capable of representing a versioned agent profile and its related resources.
+A normalized PostgreSQL schema for versioned agent profiles and their resources.
 
 ## Verification
 
 - [ ] Migrations apply cleanly.
-- [ ] Migrations can be safely recreated in a fresh test database.
+- [ ] Fresh test database can recreate the schema.
 - [ ] Schema constraints are tested.
 - [ ] Profile/version persistence tests pass.
-- [ ] Cross-project resource isolation tests pass.
+- [ ] Cross-project isolation tests pass.
 
 ---
 
@@ -92,34 +96,35 @@ A normalized PostgreSQL schema capable of representing a versioned agent profile
 
 ## Goal
 
-Expose API endpoints for creating, reading, updating, and versioning profiles and their configuration resources.
+Expose APIs to create and manage projects, profiles, versions, and profile resources.
 
 ## Tasks
 
-- [ ] Implement project resource endpoints.
-- [ ] Implement profile creation endpoint.
-- [ ] Implement profile retrieval endpoint.
-- [ ] Implement profile update/version-creation behavior.
-- [ ] Implement model/provider management endpoints.
-- [ ] Implement library management endpoints.
-- [ ] Implement skill management endpoints.
-- [ ] Implement instruction/Markdown resource endpoints.
-- [ ] Implement E2E/test-definition endpoints.
-- [ ] Add request/response validation with Zod.
+- [ ] Implement project endpoints.
+- [ ] Implement profile creation.
+- [ ] Implement profile retrieval.
+- [ ] Implement profile update/version creation.
+- [ ] Implement model/provider endpoints.
+- [ ] Implement library endpoints.
+- [ ] Implement skill endpoints.
+- [ ] Implement Markdown instruction endpoints.
+- [ ] Implement E2E test-definition endpoints.
+- [ ] Add Zod request/response validation.
 - [ ] Define stable API error codes and response shapes.
-- [ ] Document the public API with OpenAPI.
+- [ ] Add OpenAPI documentation.
 
 ## Deliverable
 
-A usable API for building and managing versioned agent profiles without direct database access.
+A usable API for managing versioned agent profiles without direct database access.
 
 ## Verification
 
-- [ ] CRUD/integration tests pass for each implemented resource.
+- [ ] Integration tests pass for each implemented resource.
 - [ ] Invalid payloads return stable validation errors.
 - [ ] Unauthorized resource access is denied.
 - [ ] Cross-project access is denied.
-- [ ] OpenAPI description matches the implemented endpoints.
+- [ ] OpenAPI matches the implemented API.
+- [ ] E2E testing of API endpoints only passes for the implemented surface.
 
 ---
 
@@ -127,34 +132,34 @@ A usable API for building and managing versioned agent profiles without direct d
 
 ## Goal
 
-Secure human and GitHub Actions access without distributing long-lived credentials unnecessarily.
+Secure human access and GitHub Actions access without unnecessary long-lived credentials.
 
 ## Tasks
 
-- [ ] Implement GitHub OAuth-based human authentication for management access.
+- [ ] Implement GitHub OAuth for human management access.
 - [ ] Define user/session handling.
-- [ ] Implement GitHub OIDC verification for GitHub Actions clients.
-- [ ] Extract and validate trusted GitHub identity claims.
-- [ ] Establish repository-to-project authorization mapping.
-- [ ] Establish profile/resource authorization rules.
-- [ ] Add least-privilege authorization checks to protected endpoints.
-- [ ] Prevent tokens and secrets from appearing in logs/errors.
-- [ ] Add audit logging for authentication-sensitive and authorization-sensitive events.
+- [ ] Implement GitHub OIDC verification for Actions.
+- [ ] Validate trusted GitHub identity claims.
+- [ ] Map repositories to projects.
+- [ ] Define profile/resource authorization.
+- [ ] Apply authorization to protected endpoints.
+- [ ] Add security-sensitive audit events.
 
 ## Deliverable
 
-Human users can manage authorized projects, while GitHub Actions can authenticate through OIDC and access only the resources explicitly authorized for their repository/project.
+Humans can manage authorized projects, and GitHub Actions can authenticate through OIDC and access only explicitly authorized resources.
 
 ## Verification
 
-- [ ] Valid human authentication path passes.
-- [ ] Invalid/expired human session path is rejected.
+- [ ] Valid human authentication succeeds.
+- [ ] Invalid/expired human sessions are rejected.
 - [ ] Valid GitHub OIDC identity is accepted.
-- [ ] Invalid OIDC token is rejected.
-- [ ] Unauthorized repository is rejected.
-- [ ] Authorized repository can access its allowed project/profile.
+- [ ] Invalid or expired OIDC identity is rejected.
+- [ ] Unauthorized repositories are rejected.
+- [ ] Authorized repositories can access allowed profiles.
 - [ ] Cross-project access is rejected.
-- [ ] Sensitive credentials do not appear in logs or API responses.
+- [ ] E2E testing of authenticated API endpoints only passes for authorized paths and rejects unauthorized paths.
+- [ ] Credentials are absent from logs and API responses.
 
 ---
 
@@ -162,35 +167,35 @@ Human users can manage authorized projects, while GitHub Actions can authenticat
 
 ## Goal
 
-Create the central capability that resolves a profile into one deterministic configuration snapshot for an execution client.
+Resolve a profile into one deterministic, versioned configuration snapshot for an execution client.
 
 ## Tasks
 
-- [ ] Define profile resolution semantics.
-- [ ] Implement pinned version resolution such as `testing@12`.
+- [ ] Define profile-resolution semantics.
+- [ ] Implement pinned resolution such as `testing@12`.
 - [ ] Implement moving-channel resolution such as `testing@latest`.
 - [ ] Resolve model/provider configuration.
 - [ ] Resolve libraries.
 - [ ] Resolve skills.
 - [ ] Resolve Markdown instructions.
-- [ ] Resolve test/E2E definitions.
-- [ ] Return a stable resolved-configuration schema.
+- [ ] Resolve E2E test definitions.
+- [ ] Define the resolved-configuration response schema.
 - [ ] Include profile/version identity in the response.
-- [ ] Ensure the resolved result is deterministic for a given version.
-- [ ] Avoid exposing provider credentials in the resolved profile.
+- [ ] Ensure identical inputs and version produce identical resolved configuration.
+- [ ] Exclude provider credentials from resolved profiles.
 
 ## Deliverable
 
-A single authenticated API request can resolve a profile into all configuration required by an execution client.
+One authenticated API request resolves a profile into the complete configuration required by an execution client.
 
 ## Verification
 
-- [ ] Pinned profile versions resolve consistently.
+- [ ] Pinned versions resolve consistently.
 - [ ] `latest` resolves to the expected version.
 - [ ] Resource relationships resolve correctly.
-- [ ] Two projects cannot resolve each other's resources.
-- [ ] A configuration change creates a new version rather than silently mutating an existing immutable version.
-- [ ] Real HTTP requests verify the end-to-end resolution contract.
+- [ ] Cross-project resources cannot resolve.
+- [ ] Existing immutable versions never change after later edits.
+- [ ] E2E testing of the profile-resolution API only passes with the expected snapshot contract.
 
 ---
 
@@ -198,19 +203,19 @@ A single authenticated API request can resolve a profile into all configuration 
 
 ## Goal
 
-Create a thin, reusable GitHub Action that authenticates with GitHub OIDC, requests a profile, and prepares the execution environment without embedding project-specific model/configuration decisions.
+Create a thin GitHub Action that authenticates through OIDC, requests a profile, and exposes the resolved configuration without embedding model decisions.
 
 ## Tasks
 
 - [ ] Create the TypeScript GitHub Action package.
-- [ ] Request an OIDC identity token from GitHub Actions.
-- [ ] Authenticate against the profile-resolution API.
-- [ ] Add a simple profile input interface.
-- [ ] Resolve and materialize libraries/resources required by the returned profile.
-- [ ] Expose the resolved profile to later execution steps in a stable format.
-- [ ] Produce structured logs suitable for both humans and agents.
-- [ ] Handle API/authentication/configuration failures with actionable errors.
-- [ ] Ensure the Action itself does not contain hard-coded model/provider decisions.
+- [ ] Request a GitHub OIDC identity token.
+- [ ] Authenticate with the profile-resolution API.
+- [ ] Add a profile input interface.
+- [ ] Materialize resources required by the resolved profile.
+- [ ] Expose the resolved profile to subsequent steps.
+- [ ] Produce structured execution logs.
+- [ ] Handle API, authentication, and resolution failures.
+- [ ] Keep model/provider selection out of Action code.
 
 ## Deliverable
 
@@ -219,10 +224,11 @@ A repository can consume a central profile with a minimal workflow configuration
 ## Verification
 
 - [ ] Action builds successfully.
-- [ ] Action can authenticate from a GitHub Actions environment.
+- [ ] Action authenticates in a GitHub Actions environment.
 - [ ] Authorized repository resolves its profile.
 - [ ] Unauthorized repository is rejected.
 - [ ] Resolved configuration is available to subsequent steps.
+- [ ] E2E testing of the GitHub Action → API flow only passes for authorized and expected configuration paths.
 - [ ] Failure output is structured and actionable.
 
 ---
@@ -231,79 +237,79 @@ A repository can consume a central profile with a minimal workflow configuration
 
 ## Goal
 
-Turn skills, Markdown instructions, and E2E definitions into first-class agent-environment resources that can drive autonomous testing and other execution workflows.
+Make skills, Markdown instructions, and E2E definitions usable as agent-environment resources.
 
 ## Tasks
 
-- [ ] Define the schema and conventions for reusable skills.
-- [ ] Define Markdown instruction resource metadata.
+- [ ] Define reusable skill conventions.
+- [ ] Define Markdown instruction metadata.
 - [ ] Define `E2E.md` semantics and execution contract.
-- [ ] Define how an E2E definition references environment requirements, commands, success criteria, and artifacts.
+- [ ] Define environment requirements, commands, success criteria, and artifact boundaries for E2E definitions.
 - [ ] Implement resource retrieval through the API.
-- [ ] Implement resource versioning/immutability where required.
-- [ ] Add representative autonomous testing examples.
-- [ ] Define artifact/result reporting boundaries.
+- [ ] Implement required resource versioning/immutability.
+- [ ] Add representative autonomous-testing examples.
+- [ ] Define result reporting boundaries.
 
 ## Deliverable
 
-An execution client can obtain a complete profile containing model selection plus reusable skills, instructions, and E2E test contracts.
+An execution client can retrieve model selection plus reusable skills, instructions, and E2E test contracts from one profile.
 
 ## Verification
 
 - [ ] Skill retrieval tests pass.
 - [ ] Markdown instruction retrieval tests pass.
 - [ ] E2E definition validation tests pass.
+- [ ] E2E testing of the API-only resource retrieval flow passes.
 - [ ] A real test environment consumes an E2E definition successfully.
 - [ ] Failure and artifact behavior are verified.
 
 ---
 
-# Phase 8 — Hardening and Developer Experience
+# Phase 8 — Hardening
 
 ## Goal
 
-Make the platform safe and pleasant to operate as a central dependency across multiple repositories and workflows.
+Make the control plane safe and stable as a shared dependency across repositories and workflows.
 
 ## Tasks
 
 - [ ] Add rate limiting appropriate to the API surface.
 - [ ] Add request IDs and structured server logging.
-- [ ] Add audit-log querying where operationally useful.
-- [ ] Add API compatibility/versioning policy.
-- [ ] Add profile rollback/version selection operations.
-- [ ] Add configuration diffing between profile versions.
-- [ ] Add stronger repository/project management workflows.
-- [ ] Publish reusable API and Action documentation.
+- [ ] Add useful audit-log queries.
+- [ ] Define API compatibility/versioning policy.
+- [ ] Add profile rollback/version selection.
+- [ ] Add configuration diffs between profile versions.
+- [ ] Strengthen repository/project management workflows.
+- [ ] Publish API and Action documentation.
 - [ ] Add CI coverage for API and Action packages.
-- [ ] Review threat model and least-privilege assumptions.
+- [ ] Review the threat model and least-privilege assumptions.
 
 ## Deliverable
 
-A production-ready API-first control plane suitable for being shared by multiple GitHub repositories and AI-agent workflows.
+A stable API-first control plane suitable for multiple repositories and AI-agent workflows.
 
 ## Verification
 
 - [ ] Full test suite passes.
 - [ ] Typecheck and lint/format checks pass.
-- [ ] Security/authorization test suite passes.
+- [ ] Security and authorization tests pass.
+- [ ] E2E testing of the API-only production flow passes.
 - [ ] Version rollback is verified.
 - [ ] Multi-project isolation is verified end to end.
-- [ ] Documentation matches the implemented API and Action behavior.
+- [ ] Documentation matches implemented behavior.
 
 ---
 
 # Future Work — Not Yet Scheduled
 
-These ideas are intentionally outside the initial implementation until a concrete requirement justifies them:
-
 - [ ] Additional execution clients beyond GitHub Actions.
 - [ ] CLI management client.
 - [ ] SDKs for other languages.
-- [ ] More provider-specific secret management integrations.
+- [ ] Additional provider secret-management integrations.
 - [ ] Advanced policy engines.
 - [ ] Usage/cost accounting.
 - [ ] Webhooks/event-driven configuration updates.
 - [ ] Remote execution infrastructure.
 - [ ] Multi-region deployment.
 
-Do not implement future work merely because the schema or architecture could support it.
+Do not implement future work without a scheduled phase and concrete requirement.
