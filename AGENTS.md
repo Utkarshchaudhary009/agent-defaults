@@ -39,42 +39,48 @@ Rules for amendments:
 - Write each amendment so a fresh agent can continue from the plan alone, with zero reliance on chat.
 - Keep amendments atomic — do not bundle unrelated direction changes into one edit.
 
-## 3 · The Phase Loop
+## 3 · The Coding Workflow
 
-Every phase runs the same five steps:
+For every phase, follow this loop:
 
 ```text
-Inspect → Implement → Verify → Sync → Commit
+Code
+  ↓
+Review with coding sub-agents
+  ↓
+Test the feature with a testing/E2E agent
+  ↓
+Commit + push
+  ↓
+Create PR
+  ↓
+Wait ~10 minutes
+  ↓
+Check GitHub AI/bot reviews
+  ↓
+Fix valid issues
+  ↓
+Test the feature again
+  ↓
+Commit + push
+  ↓
+Wait ~10 minutes
+  ↓
+Check GitHub AI/bot reviews again
+  ↓
+Repeat until there are no actionable issues
 ```
 
-### 1. Inspect
-
-- Read the entire current phase in `docs/plan.md`.
-- Survey the existing repository before changing architecture; prefer existing project patterns over inventing parallel conventions.
-- Check whether the work already exists in the plan before adding anything new.
-
-### 2. Implement
-
-- Build exactly the tasks listed for this phase. No speculative later-phase features (see YAGNI, §12).
-- Keep the API and core domain abstractions independent of any particular client or agent implementation.
-- Favor small, composable modules over one large service.
-- Implement the smallest change that solves the task.
-
-### 3. Verify (definition of done)
-
-Code merely existing is **not** completion. A task is complete only when its corresponding verification has actually been run and passed (§4).
-
-### 4. Sync the plan
-
-Only after verified success:
-
-- Flip completed tasks from `- [ ]` to `- [x]`; flip a verification item only if it passed.
-- Never mark an entire phase complete while any task or verification item in it remains unchecked.
-- The plan must stay synchronized with the actual repository state.
-
-### 5. Commit
-
-Follow the Git Workflow (§5).
+- Build the current phase first. Do not implement speculative later-phase work.
+- Use coding-review sub-agents to review the implementation before committing.
+- Launch a testing/E2E agent to verify that the feature actually works in the required environment.
+- Only commit and push after the implementation has been reviewed and verified.
+- Create the PR after pushing the verified work.
+- Wait approximately 10 minutes for GitHub AI/code-review bots to review the PR.
+- Read every bot suggestion and fix valid improvements or issues.
+- After **every** review-driven change, run the relevant feature/E2E tests again to ensure the fix did not break anything.
+- Commit and push the verified fixes, then wait for another review cycle.
+- Keep looping until the GitHub bots have no actionable issues.
 
 ## 4 · Verification Standards (evidence over optimism)
 
@@ -90,17 +96,15 @@ Minimum bar before declaring a phase complete:
 
 **Blocked-verification rule:** if something cannot run due to environmental limits, do not silently mark it complete. Record the limitation, leave the checkbox unchecked, and report exactly what remains unverified.
 
-## 5 · Git Workflow (gates → review → stack → trunk)
+## 5 · Git Workflow
 
-1. Read the files the task needs.
-2. Implement the smallest viable change.
-3. **Gates:** typecheck + tests green before any commit. Red gates = no commit.
-4. Run a local review subagent over the diff; fix everything it flags.
-5. Commit + PR. Large sequential work → **stacked PRs** instead: one concern per layer, dependencies point downward, every layer passes the gates alone. Use `gh stack init/add/push/submit`; land via `gh stack merge` (plain `gh pr merge` fails on stacks).
-6. After ~10 min, address GitHub bot reviews: fix in the **lowest layer owning the issue**, then `gh stack rebase --upstack` if stacked; re-run gates; commit.
-7. Merge to `main` (trunk stays releasable).
+- Make coherent commits tied to a phase or tightly related work.
+- Run the required review and verification workflow before committing.
+- Push the commit to GitHub and create a PR.
+- Keep the PR updated through the review/fix/test loop in §3.
+- Merge only after the review loop is clean and the phase is verified.
 
-Commit discipline — coherent commits tied to a phase or tightly related work; use the commit-pr-writing skill. Format:
+Commit format:
 
 ```text
 phase N: <short description>
