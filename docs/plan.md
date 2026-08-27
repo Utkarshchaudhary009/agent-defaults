@@ -31,16 +31,16 @@ Create the minimal Bun + TypeScript + Hono service with Neon PostgreSQL, Drizzle
 
 ## Tasks
 
-- [ ] Initialize the Bun + TypeScript project.
-- [ ] Add Hono.
-- [ ] Add Drizzle and Neon/PostgreSQL connectivity.
-- [ ] Add Zod for API-boundary validation.
-- [ ] Establish source directories for routes, services, database, auth, and configuration.
-- [ ] Add environment-variable validation without committing secrets.
-- [ ] Create the migration workflow.
-- [ ] Add `/health`.
-- [ ] Add typecheck and lint/format scripts.
-- [ ] Add Vitest.
+- [x] Initialize the Bun + TypeScript project.
+- [x] Add Hono.
+- [x] Add Drizzle and Neon/PostgreSQL connectivity.
+- [x] Add Zod for API-boundary validation.
+- [x] Establish source directories for routes, services, database, auth, and configuration.
+- [x] Add environment-variable validation without committing secrets.
+- [x] Create the migration workflow.
+- [x] Add `/health`.
+- [x] Add typecheck and lint/format scripts.
+- [x] Add Vitest.
 
 ## Deliverable
 
@@ -48,12 +48,12 @@ A runnable Hono API with Neon connectivity and passing developer checks.
 
 ## Verification
 
-- [ ] Typecheck passes.
-- [ ] Lint/format checks pass.
-- [ ] Unit test suite passes.
-- [ ] API starts successfully.
-- [ ] `/health` returns the documented response.
-- [ ] Database connection and migration path work in a safe development environment.
+- [x] Typecheck passes.
+- [x] Lint/format checks pass.
+- [x] Unit test suite passes.
+- [x] API starts successfully.
+- [x] `/health` returns the documented response.
+- [x] Database connection and migration path work in a safe development environment.
 
 ---
 
