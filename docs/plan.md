@@ -70,7 +70,8 @@ Model projects, profiles, immutable profile versions, and reusable agent resourc
 - [ ] Define immutable profile versions.
 - [ ] Define model/provider resources.
 - [ ] Define library resources.
-- [ ] Define skill resources.
+- [ ] Define skill resources as versioned packages containing `SKILL.md` and optional supporting files.
+- [ ] Define a stable skill identifier and source reference suitable for CLI retrieval, including source/repository plus skill slug where applicable.
 - [ ] Define Markdown instruction resources.
 - [ ] Define E2E test definitions.
 - [ ] Define profile-to-resource relationships.
@@ -88,6 +89,7 @@ A normalized PostgreSQL schema for versioned agent profiles and their resources.
 - [ ] Fresh test database can recreate the schema.
 - [ ] Schema constraints are tested.
 - [ ] Profile/version persistence tests pass.
+- [ ] Skill package persistence tests cover `SKILL.md`, supporting files, version, and stable identifier.
 - [ ] Cross-project isolation tests pass.
 
 ---
@@ -107,6 +109,8 @@ Expose APIs to create and manage projects, profiles, versions, and profile resou
 - [ ] Implement model/provider endpoints.
 - [ ] Implement library endpoints.
 - [ ] Implement skill endpoints.
+- [ ] Implement skill retrieval by stable identifier/source and slug.
+- [ ] Implement skill package retrieval including `SKILL.md` and supporting files.
 - [ ] Implement Markdown instruction endpoints.
 - [ ] Implement E2E test-definition endpoints.
 - [ ] Add Zod request/response validation.
@@ -123,6 +127,7 @@ A usable API for managing versioned agent profiles without direct database acces
 - [ ] Invalid payloads return stable validation errors.
 - [ ] Unauthorized resource access is denied.
 - [ ] Cross-project access is denied.
+- [ ] Skill retrieval returns the expected package contents.
 - [ ] OpenAPI matches the implemented API.
 - [ ] E2E testing of API endpoints only passes for the implemented surface.
 
@@ -176,7 +181,7 @@ Resolve a profile into one deterministic, versioned configuration snapshot for a
 - [ ] Implement moving-channel resolution such as `testing@latest`.
 - [ ] Resolve model/provider configuration.
 - [ ] Resolve libraries.
-- [ ] Resolve skills.
+- [ ] Resolve skills as versioned packages.
 - [ ] Resolve Markdown instructions.
 - [ ] Resolve E2E test definitions.
 - [ ] Define the resolved-configuration response schema.
@@ -193,6 +198,7 @@ One authenticated API request resolves a profile into the complete configuration
 - [ ] Pinned versions resolve consistently.
 - [ ] `latest` resolves to the expected version.
 - [ ] Resource relationships resolve correctly.
+- [ ] Skill package versions resolve to the expected `SKILL.md` and supporting files.
 - [ ] Cross-project resources cannot resolve.
 - [ ] Existing immutable versions never change after later edits.
 - [ ] E2E testing of the profile-resolution API only passes with the expected snapshot contract.
@@ -241,7 +247,7 @@ Make skills, Markdown instructions, and E2E definitions usable as agent-environm
 
 ## Tasks
 
-- [ ] Define reusable skill conventions.
+- [ ] Define reusable skill conventions compatible with `SKILL.md` plus optional supporting files.
 - [ ] Define Markdown instruction metadata.
 - [ ] Define `E2E.md` semantics and execution contract.
 - [ ] Define environment requirements, commands, success criteria, and artifact boundaries for E2E definitions.
