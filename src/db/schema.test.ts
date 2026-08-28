@@ -52,6 +52,12 @@ type ProfileVersion = typeof profileVersions.$inferSelect;
 let sql: postgres.Sql;
 let db: Database;
 
+// Dedicated, single-connection client used only for per-test cleanup. The
+// audit-log TRUNCATE guard is GUC-based, and a GUC set on one pooled
+// connection does not apply to another, so cleanup must run on its own
+// connection with the maintenance flag set once.
+let cleanup: postgres.Sql;
+
 async function createProject(slug: string): Promise<Project> {
   const rows = await db
     .insert(projects)
@@ -118,17 +124,23 @@ withDb("core data model (Phase 2)", () => {
     sql = created.sql;
     db = created.db;
     await migrate(db, { migrationsFolder });
+
+    // Cleanup connection used by beforeEach; enable the audit-truncate
+    // maintenance path on this one session.
+    cleanup = postgres(url, { max: 1, prepare: false });
+    await cleanup.unsafe(`SET app.allow_audit_truncate = 'true'`);
   });
 
   afterAll(async () => {
+    await cleanup.end({ timeout: 5 });
     await sql.end({ timeout: 5 });
   });
 
   beforeEach(async () => {
     // TRUNCATE bypasses the immutability row triggers, so it is safe for
-    // cleanup. The audit_logs TRUNCATE guard (0004) requires an explicit GUC.
-    await sql.unsafe(`SET app.allow_audit_truncate = 'true'`);
-    await sql.unsafe(`
+    // cleanup. The audit_logs TRUNCATE guard (0004) is satisfied for this
+    // dedicated cleanup connection, which has the maintenance GUC enabled.
+    await cleanup.unsafe(`
       TRUNCATE TABLE
         projects, profiles, profile_versions,
         models, libraries, skills, skill_versions, skill_files,
@@ -863,6 +875,11 @@ withDb("core data model (Phase 2)", () => {
         prepare: false,
       });
       try {
+        // The default session (GUC never set) must also be blocked.
+        await expectPgError(
+          conn.unsafe("TRUNCATE TABLE audit_logs"),
+          "P0001",
+        );
         await conn.unsafe("SET app.allow_audit_truncate = 'false'");
         await expectPgError(
           conn.unsafe("TRUNCATE TABLE audit_logs"),

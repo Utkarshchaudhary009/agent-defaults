@@ -68,11 +68,14 @@ END;
 $$;--> statement-breakpoint
 -- Prevent a plain TRUNCATE from wiping the audit trail. Table owners still
 -- need a maintenance path, so TRUNCATE is honoured only when the session has
--- explicitly opted in via the app.allow_audit_truncate GUC.
+-- explicitly opted in via the app.allow_audit_truncate GUC. IS DISTINCT FROM
+-- is used because current_setting(..., true) returns NULL when the GUC is
+-- unset, and NULL <> 'true' is falsy — otherwise a default session could
+-- truncate without opt-in.
 CREATE OR REPLACE FUNCTION block_audit_truncate() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
-	IF current_setting('app.allow_audit_truncate', true) <> 'true' THEN
+	IF current_setting('app.allow_audit_truncate', true) IS DISTINCT FROM 'true' THEN
 		RAISE EXCEPTION 'audit_logs truncation is not allowed'
 			USING ERRCODE = 'P0001';
 	END IF;
