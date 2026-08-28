@@ -161,7 +161,7 @@ optimised for being executable as a script with no branching.
                                                     → 204
 12. POST   /v1/projects/{projectId}/profiles/{profileId}/versions/{versionId}/publish
                                                     → 204  (seals the profile version)
-13. GET    /v1/projects/{projectId}/profiles/{profileId}@1     (Phase 5 — resolve)
+13. GET    /v1/resolve/{projectId}/profiles/{slug}@1           (Phase 5 — resolve)
 ```
 
 To change anything in a published version: create a new draft (step 9 with
@@ -179,8 +179,10 @@ and (c) the next canonical call.
       *Suggested flow*: call `POST /v1/projects` once at the start of setup
       (step 1). If you receive `409 project_slug_taken`, the project already
       exists — call `GET /v1/projects?slug=...` and reuse the returned id.
-      `DELETE` is rarely called; it cascades to every resource and audit row
-      gets `project_id` set to `NULL` (history preserved).
+      `DELETE` is rarely called; it cascades to every resource and audit
+      rows get `project_id` set to `NULL` (history preserved — see the
+      Phase 2 `0003_low_human_torch.sql` migration, which installs the
+      `audit_logs.project_id` foreign key as `ON DELETE SET NULL`).
 
 - [ ] **Profile creation.** `POST /v1/projects/{projectId}/profiles`,
       `GET /v1/projects/{projectId}/profiles/{profileId}`,
@@ -199,7 +201,12 @@ and (c) the next canonical call.
       a new draft version, version number is server-assigned, default
       `version=last+1` if not specified).
       `PATCH /v1/projects/{projectId}/profiles/{profileId}/versions/{versionId}`
-      (update notes on a draft).
+      (update a draft's mutable metadata — `notes` and free-text fields only).
+      The patch endpoint is **strict**: it does NOT accept `status` or
+      `version`; the only way to publish a draft is the publish endpoint
+      below. A patch attempt that includes `status` or `version` returns
+      `400 validation_failed`. A patch on a published version returns
+      `409 version_already_published`.
       *Suggested flow*: this is the "create v2" call after a published v1
       needs changes. On `409 version_already_exists` (you tried to specify
       the version number explicitly and it is taken), omit the version field
@@ -311,7 +318,6 @@ in the client.
 | 409  | `version_already_exists`      | Explicit version number is taken      | Omit the version field; the server picks the next number.    |
 | 409  | `version_already_published`   | Publish on a non-draft version        | `GET /v1/.../profiles/{profileId}` to find the latest.       |
 | 409  | `version_has_no_resources`    | Publish on a draft with no junctions  | Add at least one junction (model/skill/library) and retry.   |
-| 422  | `invalid_status_transition`   | Flipping a published version to draft | Create a new version (POST .../versions) instead.             |
 | 5xx  | `internal_error`              | Server fault                          | Retry with exponential backoff up to 3 times; then surface.  |
 
 ## Verification
@@ -453,10 +459,10 @@ configuration required by an execution client.
 | 400  | `invalid_version_pin`         | `@latest` or `@12` is malformed       | Fix the URL; do not retry.                                   |
 | 401  | `unauthenticated`             | Missing / expired credential          | Re-authenticate (Phase 4) and retry.                         |
 | 403  | `cross_project_access`        | Path projectId does not match token   | Stop. The token is for a different project.                  |
+| 404  | `project_not_found`           | Bad projectId in the path             | `GET /v1/projects?slug=...` to look up by slug.              |
 | 404  | `profile_not_found`           | Unknown slug                          | `GET /v1/projects/{projectId}/profiles?slug=...`.            |
 | 404  | `version_not_found`           | Pinned number does not exist          | Fail closed. Do not fall back to `@latest`.                  |
 | 404  | `no_published_version`        | `@latest` requested before publish    | `POST .../versions` to create and publish a version.         |
-| 409  | `profile_has_no_resources`    | Published version has no junctions    | `POST .../versions` to create a new draft with resources.    |
 | 5xx  | `internal_error`              | Server fault                          | Retry with exponential backoff up to 3 times; then surface.  |
 
 ## Verification

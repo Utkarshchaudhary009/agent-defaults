@@ -19,9 +19,12 @@
 --    against the new body without churn.
 -- 3) Add sealing triggers to the five `profile_version_*` junction tables
 --    and to `skill_files`: once the parent version is `published`, INSERT,
---    UPDATE, and DELETE on children raise. The contents of a published
---    version are immutable end to end (no nested-trigger bypass here: a
---    published version must not change under any client path).
+--    UPDATE, and DELETE on children raise. A nested-trigger path
+--    (`pg_trigger_depth() > 1`, e.g. a project purge that cascades through
+--    the parent version's row, then through the FK CASCADE on the child
+--    rows) is allowed so the project-purge semantics from migration 0004
+--    still hold. Direct client DML on a published version's children is
+--    always rejected.
 
 ALTER TABLE "profile_versions"
   ADD COLUMN "status" text NOT NULL DEFAULT 'draft';--> statement-breakpoint
@@ -46,6 +49,21 @@ ALTER TABLE "profile_versions"
 ALTER TABLE "skill_versions"
   ADD CONSTRAINT "skill_versions_status_valid"
   CHECK ("status" IN ('draft', 'published'));--> statement-breakpoint
+-- Link the two columns: a published row must carry a `published_at`
+-- timestamp, and a draft must not. This keeps the timestamp trustworthy
+-- for downstream queries (e.g. "show me everything published this week").
+ALTER TABLE "profile_versions"
+  ADD CONSTRAINT "profile_versions_status_published_at_match"
+  CHECK (
+    (("status" = 'published') AND ("published_at" IS NOT NULL))
+    OR (("status" = 'draft') AND ("published_at" IS NULL))
+  );--> statement-breakpoint
+ALTER TABLE "skill_versions"
+  ADD CONSTRAINT "skill_versions_status_published_at_match"
+  CHECK (
+    (("status" = 'published') AND ("published_at" IS NOT NULL))
+    OR (("status" = 'draft') AND ("published_at" IS NULL))
+  );--> statement-breakpoint
 -- Re-define the version-row immutability trigger function in place. The
 -- function name is unchanged so the existing triggers
 -- (`profile_versions_immutable`, `skill_versions_immutable`) continue to
@@ -62,10 +80,16 @@ CREATE OR REPLACE FUNCTION enforce_immutable_row() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
   -- Nested-trigger path: an outer cascade (e.g. project purge) is allowed
-  -- to update or delete the row, so the cascade can reach children.
+  -- to delete the row so the cascade can reach children. A nested UPDATE
+  -- is rejected: the only legitimate transition out of `published` is
+  -- a row delete (during purge), and the publish endpoint is the only
+  -- legitimate way to mutate a draft's metadata, which it does at depth
+  -- 1. This keeps a future `ON UPDATE CASCADE` from silently rewriting a
+  -- published version.
   IF pg_trigger_depth() > 1 THEN
     IF TG_OP = 'UPDATE' THEN
-      RETURN NEW;
+      RAISE EXCEPTION 'nested UPDATE on % is not allowed', TG_TABLE_NAME
+        USING ERRCODE = 'P0001';
     ELSE
       RETURN OLD;
     END IF;
@@ -105,13 +129,17 @@ DECLARE
   parent_table text;
 BEGIN
   -- Nested-trigger path: an outer cascade (project purge) is allowed to
-  -- mutate the row, so the cascade can complete. Same depth rule as
-  -- migration 0004's `enforce_immutable_row` for the version tables.
+  -- delete the child rows so the cascade can complete. Nested UPDATE or
+  -- INSERT is rejected: a published version must not gain or change
+  -- children as a side effect of any cascade. The only legitimate DELETE
+  -- path here is the FK CASCADE from a parent's deletion during project
+  -- purge; the parent's own trigger already gated that path.
   IF pg_trigger_depth() > 1 THEN
     IF TG_OP = 'DELETE' THEN
       RETURN OLD;
     ELSE
-      RETURN NEW;
+      RAISE EXCEPTION 'nested % on % is not allowed', TG_OP, TG_TABLE_NAME
+        USING ERRCODE = 'P0001';
     END IF;
   END IF;
   IF TG_TABLE_NAME = 'skill_files' THEN
