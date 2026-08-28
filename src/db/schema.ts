@@ -26,12 +26,16 @@ import {
  *   a unique `(id, project_id)` pair on the resource table, which makes it
  *   impossible for a profile version to reference a resource belonging to
  *   another project.
- * - `profile_versions` and `skill_versions` are immutable. Uniqueness of the
- *   version number per parent plus database triggers (see migration
- *   `0002_immutability_triggers`, hand-written because drizzle-kit cannot
- *   express triggers) forbid UPDATE and DELETE on their rows. New state is
- *   expressed as new versions; retirement is handled with `deprecated` flags,
- *   never by mutating or deleting version rows.
+ * - `profile_versions` and `skill_versions` follow a `draft` -> `published`
+ *   lifecycle. While `draft`, the version row plus its junction rows
+ *   (`profile_version_models`, `profile_version_libraries`,
+ *   `profile_version_skills`, `profile_version_instructions`,
+ *   `profile_version_e2e_tests`) and supporting `skill_files` are freely
+ *   editable. On `published`, all of these are sealed (UPDATE/DELETE/INSERT
+ *   as appropriate raise) so the version is a stable snapshot. To change a
+ *   published version's contents, create a new draft version. The sealing
+ *   is implemented by hand-written trigger migrations (drizzle-kit cannot
+ *   express triggers).
  * - Skills are versioned packages: the `skills` table holds the stable
  *   identity (`source` repository + `slug`), while `skill_versions` holds the
  *   package contents (`skill_md`, i.e. SKILL.md) and `skill_files` holds
@@ -100,10 +104,13 @@ export const profiles = pgTable(
 );
 
 /**
- * Immutable, monotonically numbered snapshot of a profile. Rows are never
- * updated or deleted (enforced by trigger). `project_id` is denormalized from
- * the owning profile and kept consistent by the composite FK
- * `(profile_id, project_id)`, so every version row always knows its project.
+ * Immutable, monotonically numbered snapshot of a profile. Rows are
+ * transitionable between `draft` (editable: row + junction rows can change)
+ * and `published` (sealed: UPDATE / DELETE on the row, and all mutations on
+ * the five junction tables for this version, raise). `project_id` is
+ * denormalized from the owning profile and kept consistent by the composite
+ * FK `(profile_id, project_id)`, so every version row always knows its
+ * project.
  */
 export const profileVersions = pgTable(
   "profile_versions",
@@ -112,6 +119,8 @@ export const profileVersions = pgTable(
     profileId: uuid("profile_id").notNull(),
     projectId: uuid("project_id").notNull(),
     version: integer("version").notNull(),
+    status: text("status").notNull().default("draft"),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
     notes: text("notes"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -124,6 +133,10 @@ export const profileVersions = pgTable(
     ),
     unique("profile_versions_id_project_unique").on(t.id, t.projectId),
     check("profile_versions_version_positive", sql`${t.version} >= 1`),
+    check(
+      "profile_versions_status_valid",
+      sql`${t.status} IN ('draft', 'published')`,
+    ),
     // Note: this FK is upgraded to ON DELETE CASCADE by the hand-written
     // migration `0004_cascade_purge.sql` (drizzle-kit cannot express it) so a
     // whole-project purge can delete version rows. Direct client DML on this
@@ -223,9 +236,11 @@ export const skills = pgTable(
 );
 
 /**
- * Immutable skill package version. `skillMd` holds the SKILL.md content;
- * supporting files live in `skill_files`. Rows are never updated or deleted
- * (enforced by trigger).
+ * Skill package version, transitionable between `draft` (editable: row +
+ * supporting files can change) and `published` (sealed: UPDATE / DELETE on
+ * the row, and INSERT / UPDATE / DELETE on `skill_files` for this version,
+ * raise). `skillMd` holds the SKILL.md content; supporting files live in
+ * `skill_files`.
  */
 export const skillVersions = pgTable(
   "skill_versions",
@@ -234,6 +249,8 @@ export const skillVersions = pgTable(
     skillId: uuid("skill_id").notNull(),
     projectId: uuid("project_id").notNull(),
     version: integer("version").notNull(),
+    status: text("status").notNull().default("draft"),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
     skillMd: text("skill_md").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -243,6 +260,10 @@ export const skillVersions = pgTable(
     unique("skill_versions_skill_version_unique").on(t.skillId, t.version),
     unique("skill_versions_id_project_unique").on(t.id, t.projectId),
     check("skill_versions_version_positive", sql`${t.version} >= 1`),
+    check(
+      "skill_versions_status_valid",
+      sql`${t.status} IN ('draft', 'published')`,
+    ),
     // Note: drizzle-kit can't express it, so this FK is upgraded to
     // ON DELETE CASCADE by `0004_cascade_purge.sql` to allow project purges.
     // Direct client DML is still blocked by the immutability trigger.

@@ -105,23 +105,62 @@ enables `app.allow_audit_truncate` (the sanctioned maintenance path).
 
 ---
 
-# Phase 3 — Profile Management API
+# Phase 3 — Profile Management API and Draft/Publish Lifecycle
 
 ## Goal
 
-Expose APIs to create and manage projects, profiles, versions, and profile resources.
+Expose APIs to create and manage projects, profiles, versions, and profile
+resources, and add the **draft → publish** lifecycle that seals a version's
+resource relationships and supporting files after publication.
+
+## Design note: draft → publish lifecycle
+
+Profile and skill versions are created in the `draft` state and may be edited
+freely while drafting: the `profile_versions` / `skill_versions` row itself
+can be retitled, its junction rows (`profile_version_models`,
+`profile_version_libraries`, `profile_version_skills`,
+`profile_version_instructions`, `profile_version_e2e_tests`) can be added or
+removed, and a `skill_versions` row's `skill_files` can be added or removed.
+
+A version transitions to `published` via the version endpoint. On publish:
+
+- The version row is sealed — UPDATE and DELETE on `profile_versions` /
+  `skill_versions` continue to raise (depth-aware, so a project purge still
+  works).
+- The version's junction rows are sealed — INSERT, UPDATE, and DELETE on
+  every `profile_version_*` junction table for that version raise.
+- The version's `skill_files` are sealed — INSERT, UPDATE, and DELETE raise.
+
+Once published, any change to a version's contents requires a new version
+(via a new draft). `skill_versions` may also be explicitly deprecated (a
+`deprecated` flag on the parent `skills` row is independent of version state).
 
 ## Tasks
 
+- [ ] Add `status` column (`draft` | `published`) to `profile_versions` and
+  `skill_versions` with a default of `draft`.
+- [ ] Add `published_at` timestamp column to `profile_versions` and
+  `skill_versions` (nullable; set on publish).
+- [ ] Define database triggers that seal a version's junction rows and
+  `skill_files` while the parent version is `published` (allow while
+  `draft`).
+- [ ] Add database triggers that allow a draft version row to be updated or
+  deleted (the existing immutability triggers only block the *published*
+  state).
+- [ ] Backfill existing version rows to `published` (the Phase 2 model had
+  no draft state; data already in the table is treated as published).
 - [ ] Implement project endpoints.
 - [ ] Implement profile creation.
 - [ ] Implement profile retrieval.
 - [ ] Implement profile update/version creation.
+- [ ] Implement version publish endpoint (transition `draft` → `published`).
 - [ ] Implement model/provider endpoints.
 - [ ] Implement library endpoints.
 - [ ] Implement skill endpoints.
+- [ ] Implement skill version creation/update/publish.
 - [ ] Implement skill retrieval by stable identifier/source and slug.
-- [ ] Implement skill package retrieval including `SKILL.md` and supporting files.
+- [ ] Implement skill package retrieval including `SKILL.md` and supporting
+  files.
 - [ ] Implement Markdown instruction endpoints.
 - [ ] Implement E2E test-definition endpoints.
 - [ ] Add Zod request/response validation.
@@ -139,6 +178,10 @@ A usable API for managing versioned agent profiles without direct database acces
 - [ ] Unauthorized resource access is denied.
 - [ ] Cross-project access is denied.
 - [ ] Skill retrieval returns the expected package contents.
+- [ ] Draft profile/skill versions can be edited (junctions, files, row).
+- [ ] Publishing a version seals its junctions and files.
+- [ ] Published versions cannot be mutated (junctions, files, or row).
+- [ ] A project purge still cascades through published versions.
 - [ ] OpenAPI matches the implemented API.
 - [ ] E2E testing of API endpoints only passes for the implemented surface.
 
@@ -319,10 +362,6 @@ A stable API-first control plane suitable for multiple repositories and AI-agent
 
 # Future Work — Not Yet Scheduled
 
-- [ ] Profile/skill "draft → publish" lifecycle that seals a version's resource
-  relationships and supporting files after publication (currently the version
-  rows are immutable, but their junction links and `skill_files` may still be
-  added until a publish concept exists).
 - [ ] Additional execution clients beyond GitHub Actions.
 - [ ] CLI management client.
 - [ ] SDKs for other languages.

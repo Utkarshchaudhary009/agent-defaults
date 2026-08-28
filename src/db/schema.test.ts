@@ -95,6 +95,22 @@ async function createProfileVersion(
   return rows[0];
 }
 
+/** Flip a profile version to `published` (the API will own this in Phase 3). */
+async function publishProfileVersion(versionId: string): Promise<void> {
+  await db
+    .update(profileVersions)
+    .set({ status: "published", publishedAt: new Date() })
+    .where(eq(profileVersions.id, versionId));
+}
+
+/** Flip a skill version to `published` (the API will own this in Phase 3). */
+async function publishSkillVersion(versionId: string): Promise<void> {
+  await db
+    .update(skillVersions)
+    .set({ status: "published", publishedAt: new Date() })
+    .where(eq(skillVersions.id, versionId));
+}
+
 /** Assert that a promise rejects with a specific PostgreSQL error code. */
 async function expectPgError(
   promise: Promise<unknown>,
@@ -326,10 +342,11 @@ withDb("core data model (Phase 2)", () => {
       expect(new Set(rows.map((r) => r.projectId))).toEqual(new Set([p.id]));
     });
 
-    it("rejects UPDATE on profile version rows", async () => {
+    it("rejects UPDATE on published profile version rows", async () => {
       const p = await createProject("proj-a");
       const profile = await createProfile(p.id, "default");
       const version = await createProfileVersion(profile.id, p.id, 1);
+      await publishProfileVersion(version.id);
       await expectPgError(
         db
           .update(profileVersions)
@@ -344,10 +361,11 @@ withDb("core data model (Phase 2)", () => {
       expect(rows[0]?.version).toBe(1);
     });
 
-    it("rejects DELETE on profile version rows", async () => {
+    it("rejects DELETE on published profile version rows", async () => {
       const p = await createProject("proj-a");
       const profile = await createProfile(p.id, "default");
       const version = await createProfileVersion(profile.id, p.id, 1);
+      await publishProfileVersion(version.id);
       await expectPgError(
         db.delete(profileVersions).where(eq(profileVersions.id, version.id)),
         "P0001",
@@ -359,7 +377,30 @@ withDb("core data model (Phase 2)", () => {
       expect(rows).toHaveLength(1);
     });
 
-    it("rejects UPDATE and DELETE on skill version rows", async () => {
+    it("allows UPDATE and DELETE on draft profile version rows", async () => {
+      const p = await createProject("proj-a");
+      const profile = await createProfile(p.id, "default");
+      const version = await createProfileVersion(profile.id, p.id, 1);
+      expect(version.status).toBe("draft");
+      // Drafts are editable: rename, retitle, even delete (e.g. an
+      // abandoned draft).
+      const [updated] = await db
+        .update(profileVersions)
+        .set({ notes: "in progress" })
+        .where(eq(profileVersions.id, version.id))
+        .returning();
+      expect(updated?.notes).toBe("in progress");
+      await db
+        .delete(profileVersions)
+        .where(eq(profileVersions.id, version.id));
+      const rows = await db
+        .select()
+        .from(profileVersions)
+        .where(eq(profileVersions.id, version.id));
+      expect(rows).toHaveLength(0);
+    });
+
+    it("rejects UPDATE and DELETE on published skill version rows", async () => {
       const p = await createProject("proj-a");
       const [skill] = await db
         .insert(skills)
@@ -371,6 +412,7 @@ withDb("core data model (Phase 2)", () => {
         .values({ skillId: skill.id, projectId: p.id, version: 1, skillMd: "# S" })
         .returning();
       if (!version) throw new Error("skill version insert failed");
+      await publishSkillVersion(version.id);
       await expectPgError(
         db
           .update(skillVersions)
@@ -421,7 +463,7 @@ withDb("core data model (Phase 2)", () => {
       );
     });
 
-    it("rejects UPDATE and DELETE on skill file rows (immutable package)", async () => {
+    it("rejects UPDATE and DELETE on skill file rows of a published skill version", async () => {
       const p = await createProject("proj-a");
       const [skill] = await db
         .insert(skills)
@@ -438,6 +480,7 @@ withDb("core data model (Phase 2)", () => {
         .values({ skillVersionId: version.id, path: "run.sh", content: "sh" })
         .returning();
       if (!file) throw new Error("skill file insert failed");
+      await publishSkillVersion(version.id);
 
       await expectPgError(
         db
@@ -450,6 +493,313 @@ withDb("core data model (Phase 2)", () => {
         db.delete(skillFiles).where(eq(skillFiles.id, file.id)),
         "P0001",
       );
+    });
+  });
+
+  describe("draft/publish lifecycle (Phase 3)", () => {
+    it("creates new version rows in `draft` with no published_at", async () => {
+      const p = await createProject("proj-a");
+      const profile = await createProfile(p.id, "default");
+      const version = await createProfileVersion(profile.id, p.id, 1);
+      expect(version.status).toBe("draft");
+      expect(version.publishedAt).toBeNull();
+    });
+
+    it("lets a draft profile version edit its junction rows freely", async () => {
+      const p = await createProject("proj-a");
+      const profile = await createProfile(p.id, "default");
+      const version = await createProfileVersion(profile.id, p.id, 1);
+
+      const [model] = await db
+        .insert(models)
+        .values({ projectId: p.id, slug: "sonnet", provider: "anthropic", modelId: "claude-sonnet" })
+        .returning();
+      if (!model) throw new Error("model insert failed");
+
+      // Insert, update, and delete a junction row while the parent is draft.
+      const [j1] = await db
+        .insert(profileVersionModels)
+        .values({ profileVersionId: version.id, projectId: p.id, modelId: model.id })
+        .returning();
+      if (!j1) throw new Error("junction insert failed");
+      await db
+        .update(profileVersionModels)
+        .set({ modelId: model.id })
+        .where(eq(profileVersionModels.profileVersionId, version.id));
+      await db
+        .delete(profileVersionModels)
+        .where(eq(profileVersionModels.profileVersionId, version.id));
+      const remaining = await db
+        .select()
+        .from(profileVersionModels)
+        .where(eq(profileVersionModels.profileVersionId, version.id));
+      expect(remaining).toHaveLength(0);
+    });
+
+    it("lets a draft skill version add and remove supporting files", async () => {
+      const p = await createProject("proj-a");
+      const [skill] = await db
+        .insert(skills)
+        .values({ projectId: p.id, slug: "s", source: "src", name: "S" })
+        .returning();
+      if (!skill) throw new Error("skill insert failed");
+      const [version] = await db
+        .insert(skillVersions)
+        .values({ skillId: skill.id, projectId: p.id, version: 1, skillMd: "# S" })
+        .returning();
+      if (!version) throw new Error("skill version insert failed");
+
+      const [file] = await db
+        .insert(skillFiles)
+        .values({ skillVersionId: version.id, path: "run.sh", content: "sh" })
+        .returning();
+      if (!file) throw new Error("file insert failed");
+      await db
+        .update(skillFiles)
+        .set({ content: "rewritten" })
+        .where(eq(skillFiles.id, file.id));
+      await db.delete(skillFiles).where(eq(skillFiles.id, file.id));
+      const remaining = await db
+        .select()
+        .from(skillFiles)
+        .where(eq(skillFiles.skillVersionId, version.id));
+      expect(remaining).toHaveLength(0);
+    });
+
+    it("seals every junction of a profile version after publish", async () => {
+      const p = await createProject("proj-a");
+      const profile = await createProfile(p.id, "default");
+      const version = await createProfileVersion(profile.id, p.id, 1);
+
+      // Insert one of each resource up front (while the version is still
+      // draft) so we can use them as the FK target once the version is
+      // published and the seal test starts.
+      const [model] = await db
+        .insert(models)
+        .values({ projectId: p.id, slug: "sonnet", provider: "anthropic", modelId: "claude-sonnet" })
+        .returning();
+      if (!model) throw new Error("model insert failed");
+      const [library] = await db
+        .insert(libraries)
+        .values({ projectId: p.id, slug: "lib", name: "Lib" })
+        .returning();
+      if (!library) throw new Error("library insert failed");
+      const [skill] = await db
+        .insert(skills)
+        .values({ projectId: p.id, slug: "s", source: "src", name: "S" })
+        .returning();
+      if (!skill) throw new Error("skill insert failed");
+      const [skillVersion] = await db
+        .insert(skillVersions)
+        .values({ skillId: skill.id, projectId: p.id, version: 1, skillMd: "# S" })
+        .returning();
+      if (!skillVersion) throw new Error("skill version insert failed");
+      const [instruction] = await db
+        .insert(instructions)
+        .values({ projectId: p.id, slug: "i", name: "I", content: "..." })
+        .returning();
+      if (!instruction) throw new Error("instruction insert failed");
+      const [e2eTest] = await db
+        .insert(e2eTests)
+        .values({ projectId: p.id, slug: "e", name: "E", definition: "..." })
+        .returning();
+      if (!e2eTest) throw new Error("e2e insert failed");
+
+      // Wire up one junction row in every junction table while the
+      // version is still draft, so the seal test has a real row to
+      // target.
+      await db.insert(profileVersionModels).values({
+        profileVersionId: version.id,
+        projectId: p.id,
+        modelId: model.id,
+      });
+      await db.insert(profileVersionLibraries).values({
+        profileVersionId: version.id,
+        projectId: p.id,
+        libraryId: library.id,
+      });
+      await db.insert(profileVersionSkills).values({
+        profileVersionId: version.id,
+        projectId: p.id,
+        skillVersionId: skillVersion.id,
+      });
+      await db.insert(profileVersionInstructions).values({
+        profileVersionId: version.id,
+        projectId: p.id,
+        instructionId: instruction.id,
+      });
+      await db.insert(profileVersionE2eTests).values({
+        profileVersionId: version.id,
+        projectId: p.id,
+        e2eTestId: e2eTest.id,
+      });
+
+      await publishProfileVersion(version.id);
+
+      // All five junction tables must reject INSERT and DELETE.
+      await expectPgError(
+        db.insert(profileVersionModels).values({
+          profileVersionId: version.id,
+          projectId: p.id,
+          modelId: model.id,
+        }),
+        "P0001",
+      );
+      await expectPgError(
+        db.insert(profileVersionLibraries).values({
+          profileVersionId: version.id,
+          projectId: p.id,
+          libraryId: library.id,
+        }),
+        "P0001",
+      );
+      await expectPgError(
+        db.insert(profileVersionSkills).values({
+          profileVersionId: version.id,
+          projectId: p.id,
+          skillVersionId: skillVersion.id,
+        }),
+        "P0001",
+      );
+      await expectPgError(
+        db.insert(profileVersionInstructions).values({
+          profileVersionId: version.id,
+          projectId: p.id,
+          instructionId: instruction.id,
+        }),
+        "P0001",
+      );
+      await expectPgError(
+        db.insert(profileVersionE2eTests).values({
+          profileVersionId: version.id,
+          projectId: p.id,
+          e2eTestId: e2eTest.id,
+        }),
+        "P0001",
+      );
+
+      for (const table of [
+        profileVersionModels,
+        profileVersionLibraries,
+        profileVersionSkills,
+        profileVersionInstructions,
+        profileVersionE2eTests,
+      ]) {
+        await expectPgError(
+          db
+            .delete(table)
+            .where(eq((table as unknown as { profileVersionId: typeof profileVersionModels.profileVersionId }).profileVersionId, version.id)),
+          "P0001",
+        );
+      }
+    });
+
+    it("seals skill_files of a skill version after publish", async () => {
+      const p = await createProject("proj-a");
+      const [skill] = await db
+        .insert(skills)
+        .values({ projectId: p.id, slug: "s", source: "src", name: "S" })
+        .returning();
+      if (!skill) throw new Error("skill insert failed");
+      const [version] = await db
+        .insert(skillVersions)
+        .values({ skillId: skill.id, projectId: p.id, version: 1, skillMd: "# S" })
+        .returning();
+      if (!version) throw new Error("skill version insert failed");
+      const [file] = await db
+        .insert(skillFiles)
+        .values({ skillVersionId: version.id, path: "run.sh", content: "sh" })
+        .returning();
+      if (!file) throw new Error("file insert failed");
+      await publishSkillVersion(version.id);
+
+      await expectPgError(
+        db.insert(skillFiles).values({
+          skillVersionId: version.id,
+          path: "another.sh",
+          content: "sh",
+        }),
+        "P0001",
+      );
+      await expectPgError(
+        db
+          .update(skillFiles)
+          .set({ content: "rewritten" })
+          .where(eq(skillFiles.id, file.id)),
+        "P0001",
+      );
+      await expectPgError(
+        db.delete(skillFiles).where(eq(skillFiles.id, file.id)),
+        "P0001",
+      );
+    });
+
+    it("rejects a status flip from `published` back to `draft`", async () => {
+      const p = await createProject("proj-a");
+      const profile = await createProfile(p.id, "default");
+      const version = await createProfileVersion(profile.id, p.id, 1);
+      await publishProfileVersion(version.id);
+      await expectPgError(
+        db
+          .update(profileVersions)
+          .set({ status: "draft" })
+          .where(eq(profileVersions.id, version.id)),
+        "P0001",
+      );
+      const [after] = await db
+        .select()
+        .from(profileVersions)
+        .where(eq(profileVersions.id, version.id));
+      expect(after?.status).toBe("published");
+    });
+
+    it("rejects invalid status values at the database level", async () => {
+      const p = await createProject("proj-a");
+      const profile = await createProfile(p.id, "default");
+      // Bypass the typed insert to push a value the CHECK constraint
+      // should reject.
+      await expectPgError(
+        sql.unsafe(
+          `INSERT INTO profile_versions (profile_id, project_id, version, status)
+           VALUES ($1, $2, 1, 'weird')`,
+          [profile.id, p.id],
+        ),
+        "23514",
+      );
+    });
+
+    it("still cascades a project purge through draft and published versions", async () => {
+      const p = await createProject("proj-a");
+      const profile = await createProfile(p.id, "default");
+      const draft = await createProfileVersion(profile.id, p.id, 1);
+      const published = await createProfileVersion(profile.id, p.id, 2);
+
+      const [model] = await db
+        .insert(models)
+        .values({ projectId: p.id, slug: "m", provider: "anthropic", modelId: "x" })
+        .returning();
+      if (!model) throw new Error("model insert failed");
+      // Wire the model to the *draft* version, then publish that version.
+      await db.insert(profileVersionModels).values({
+        profileVersionId: published.id,
+        projectId: p.id,
+        modelId: model.id,
+      });
+      await publishProfileVersion(published.id);
+
+      await db.delete(projects).where(eq(projects.id, p.id));
+      const remaining = await db
+        .select()
+        .from(profileVersions)
+        .where(eq(profileVersions.profileId, profile.id));
+      expect(remaining).toHaveLength(0);
+      const junctions = await db
+        .select()
+        .from(profileVersionModels)
+        .where(eq(profileVersionModels.modelId, model.id));
+      expect(junctions).toHaveLength(0);
+      // Sanity: the draft we created had no published state.
+      expect(draft.status).toBe("draft");
     });
   });
 
