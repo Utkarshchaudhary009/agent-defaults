@@ -26,14 +26,18 @@ import {
 /**
  * DB-backed schema tests (Phase 2 verification).
  *
- * These tests run against a real PostgreSQL database and apply the generated
- * drizzle migrations plus the hand-written immutability-trigger migration.
- * They are skipped when neither TEST_DATABASE_URL nor DATABASE_URL is set so
- * the rest of the suite runs without a database.
+ * These tests run against a real PostgreSQL test database and apply the
+ * generated drizzle migrations plus the hand-written immutability-trigger
+ * migration. They truncate and re-migrate the connected database, so they
+ * MUST NEVER run against the app runtime config (`DATABASE_URL`). They only
+ * run when an explicit `TEST_DATABASE_URL` is provided; otherwise they are
+ * skipped so the rest of the suite runs without a database.
  */
 
-const testDatabaseUrl =
-  process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
+// Deliberately no `DATABASE_URL` fallback: this suite truncates the connected
+// database. Requiring `TEST_DATABASE_URL` ensures a stray or real app
+// DATABASE_URL can never be wiped by a test run.
+const testDatabaseUrl = process.env.TEST_DATABASE_URL;
 
 const withDb = testDatabaseUrl ? describe : describe.skip;
 
@@ -121,7 +125,9 @@ withDb("core data model (Phase 2)", () => {
   });
 
   beforeEach(async () => {
-    // TRUNCATE bypasses the immutability row triggers, so it is safe for cleanup.
+    // TRUNCATE bypasses the immutability row triggers, so it is safe for
+    // cleanup. The audit_logs TRUNCATE guard (0004) requires an explicit GUC.
+    await sql.unsafe(`SET app.allow_audit_truncate = 'true'`);
     await sql.unsafe(`
       TRUNCATE TABLE
         projects, profiles, profile_versions,
@@ -763,26 +769,111 @@ withDb("core data model (Phase 2)", () => {
       );
     });
 
-    it("preserves audit history when the project is deleted", async () => {
+    it("keeps audit history and purges versioned data when a project is deleted", async () => {
       const p = await createProject("proj-a");
-      const [log] = await db
-        .insert(auditLogs)
-        .values({
-          projectId: p.id,
-          actor: "user:42",
-          action: "project.created",
-          resourceType: "project",
-          resourceId: p.id,
-        })
-        .returning();
-      if (!log) throw new Error("audit log insert failed");
 
+      // A realistic project: profile + versions, skill + versions + files,
+      // a model, a relationship, and audit entries.
+      const profile = await createProfile(p.id, "default");
+      const version = await createProfileVersion(profile.id, p.id, 1);
+
+      const [model] = await db
+        .insert(models)
+        .values({ projectId: p.id, slug: "sonnet", provider: "anthropic", modelId: "claude-sonnet" })
+        .returning();
+      if (!model) throw new Error("model insert failed");
+      await db.insert(profileVersionModels).values({
+        profileVersionId: version.id,
+        projectId: p.id,
+        modelId: model.id,
+      });
+
+      const [skill] = await db
+        .insert(skills)
+        .values({ projectId: p.id, slug: "s", source: "src", name: "S" })
+        .returning();
+      if (!skill) throw new Error("skill insert failed");
+      const [skillVersion] = await db
+        .insert(skillVersions)
+        .values({ skillId: skill.id, projectId: p.id, version: 1, skillMd: "# S" })
+        .returning();
+      if (!skillVersion) throw new Error("skill version insert failed");
+      await db.insert(skillFiles).values({
+        skillVersionId: skillVersion.id,
+        path: "run.sh",
+        content: "sh",
+      });
+      await db.insert(profileVersionSkills).values({
+        profileVersionId: version.id,
+        projectId: p.id,
+        skillVersionId: skillVersion.id,
+      });
+
+      await db.insert(auditLogs).values({
+        projectId: p.id,
+        actor: "user:42",
+        action: "project.created",
+        resourceType: "project",
+        resourceId: p.id,
+      });
+
+      // The whole project must be purgeable even with immutable version rows.
       await db.delete(projects).where(eq(projects.id, p.id));
 
-      const rows = await db.select().from(auditLogs).where(eq(auditLogs.id, log.id));
-      expect(rows).toHaveLength(1);
-      expect(rows[0]?.projectId).toBeNull();
-      expect(rows[0]?.action).toBe("project.created");
+      // Audit history survives with project_id set to null.
+      const auditRows = await db.select().from(auditLogs);
+      expect(auditRows).toHaveLength(1);
+      expect(auditRows[0]?.projectId).toBeNull();
+      expect(auditRows[0]?.action).toBe("project.created");
+
+      // All versioned + relationship data is gone.
+      const [projectCount] = await sql.unsafe<{ n: string }[]>(
+        "SELECT count(*) AS n FROM projects",
+      );
+      const [versionCount] = await sql.unsafe<{ n: string }[]>(
+        "SELECT count(*) AS n FROM profile_versions",
+      );
+      const [skillVersionCount] = await sql.unsafe<{ n: string }[]>(
+        "SELECT count(*) AS n FROM skill_versions",
+      );
+      const [junctionCount] = await sql.unsafe<{ n: string }[]>(
+        "SELECT count(*) AS n FROM profile_version_models",
+      );
+      expect(projectCount?.n).toBe("0");
+      expect(versionCount?.n).toBe("0");
+      expect(skillVersionCount?.n).toBe("0");
+      expect(junctionCount?.n).toBe("0");
+    });
+
+    it("blocks plain TRUNCATE of the audit trail unless explicitly allowed", async () => {
+      const p = await createProject("proj-a");
+      await db.insert(auditLogs).values({
+        projectId: p.id,
+        actor: "user:42",
+        action: "project.created",
+        resourceType: "project",
+        resourceId: p.id,
+      });
+
+      // Use a dedicated single connection so the maintenance GUC is applied to
+      // the same session that performs the TRUNCATE (the shared pool may
+      // scatter statements across connections).
+      const conn = postgres(testDatabaseUrl as string, {
+        max: 1,
+        prepare: false,
+      });
+      try {
+        await conn.unsafe("SET app.allow_audit_truncate = 'false'");
+        await expectPgError(
+          conn.unsafe("TRUNCATE TABLE audit_logs"),
+          "P0001",
+        );
+        // The maintenance path (GUC enabled) still works.
+        await conn.unsafe("SET app.allow_audit_truncate = 'true'");
+        await conn.unsafe("TRUNCATE TABLE audit_logs");
+      } finally {
+        await conn.end({ timeout: 5 });
+      }
     });
   });
 

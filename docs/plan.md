@@ -92,6 +92,17 @@ A normalized PostgreSQL schema for versioned agent profiles and their resources.
 - [x] Skill package persistence tests cover `SKILL.md`, supporting files, version, and stable identifier.
 - [x] Cross-project isolation tests pass.
 
+## Design note: deletion semantics
+
+Immutable version rows (`profile_versions`, `skill_versions`, `skill_files`) and
+their junction links are cascade-deletable when an *owning project* is deleted:
+the parent FKs are upgraded to `ON DELETE CASCADE` (migration `0004`) and the
+immutability triggers only reject **direct** client DML (they allow writes that
+arrive from a parent cascade, detected via `pg_trigger_depth()`). A project's
+audit history is preserved across deletion via `ON DELETE SET NULL`.
+`audit_logs` is append-only and also rejects `TRUNCATE` unless the session
+enables `app.allow_audit_truncate` (the sanctioned maintenance path).
+
 ---
 
 # Phase 3 — Profile Management API
@@ -308,6 +319,10 @@ A stable API-first control plane suitable for multiple repositories and AI-agent
 
 # Future Work — Not Yet Scheduled
 
+- [ ] Profile/skill "draft → publish" lifecycle that seals a version's resource
+  relationships and supporting files after publication (currently the version
+  rows are immutable, but their junction links and `skill_files` may still be
+  added until a publish concept exists).
 - [ ] Additional execution clients beyond GitHub Actions.
 - [ ] CLI management client.
 - [ ] SDKs for other languages.

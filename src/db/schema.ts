@@ -124,6 +124,10 @@ export const profileVersions = pgTable(
     ),
     unique("profile_versions_id_project_unique").on(t.id, t.projectId),
     check("profile_versions_version_positive", sql`${t.version} >= 1`),
+    // Note: this FK is upgraded to ON DELETE CASCADE by the hand-written
+    // migration `0004_cascade_purge.sql` (drizzle-kit cannot express it) so a
+    // whole-project purge can delete version rows. Direct client DML on this
+    // table is still blocked by the immutability trigger.
     foreignKey({
       name: "profile_versions_profile_project_fk",
       columns: [t.profileId, t.projectId],
@@ -239,6 +243,9 @@ export const skillVersions = pgTable(
     unique("skill_versions_skill_version_unique").on(t.skillId, t.version),
     unique("skill_versions_id_project_unique").on(t.id, t.projectId),
     check("skill_versions_version_positive", sql`${t.version} >= 1`),
+    // Note: drizzle-kit can't express it, so this FK is upgraded to
+    // ON DELETE CASCADE by `0004_cascade_purge.sql` to allow project purges.
+    // Direct client DML is still blocked by the immutability trigger.
     foreignKey({
       name: "skill_versions_skill_project_fk",
       columns: [t.skillId, t.projectId],
@@ -335,6 +342,10 @@ function junctionExtras(
 ) {
   return [
     primaryKey({ name: names.pk, columns: [t.profileVersionId, resourceId] }),
+    // Note: the version-side FK is upgraded to ON DELETE CASCADE by
+    // `0004_cascade_purge.sql` so a project purge removes a profile version
+    // and its relationships together. Sealing relationships at publish is a
+    // Phase 3 draft/publish concern (see docs/plan.md Future Work).
     foreignKey({
       name: names.versionFk,
       columns: [t.profileVersionId, t.projectId],
