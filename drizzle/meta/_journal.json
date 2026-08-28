@@ -8,6 +8,27 @@
       "when": 1787838297229,
       "tag": "0000_yellow_purifiers",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1787842685144,
+      "tag": "0001_dashing_black_widow",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787842685145,
+      "tag": "0002_immutability_triggers",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1787885715232,
+      "tag": "0003_low_human_torch",
+      "breakpoints": true
     }
   ]
 }

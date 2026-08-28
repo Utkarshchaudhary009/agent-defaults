@@ -65,19 +65,19 @@ Model projects, profiles, immutable profile versions, and reusable agent resourc
 
 ## Tasks
 
-- [ ] Define project ownership and isolation.
-- [ ] Define profiles within projects.
-- [ ] Define immutable profile versions.
-- [ ] Define model/provider resources.
-- [ ] Define library resources.
-- [ ] Define skill resources as versioned packages containing `SKILL.md` and optional supporting files.
-- [ ] Define a stable skill identifier and source reference suitable for CLI retrieval, including source/repository plus skill slug where applicable.
-- [ ] Define Markdown instruction resources.
-- [ ] Define E2E test definitions.
-- [ ] Define profile-to-resource relationships.
-- [ ] Define audit-log storage for configuration mutations.
-- [ ] Add uniqueness and isolation constraints.
-- [ ] Create migrations.
+- [x] Define project ownership and isolation.
+- [x] Define profiles within projects.
+- [x] Define immutable profile versions.
+- [x] Define model/provider resources.
+- [x] Define library resources.
+- [x] Define skill resources as versioned packages containing `SKILL.md` and optional supporting files.
+- [x] Define a stable skill identifier and source reference suitable for CLI retrieval, including source/repository plus skill slug where applicable.
+- [x] Define Markdown instruction resources.
+- [x] Define E2E test definitions.
+- [x] Define profile-to-resource relationships.
+- [x] Define audit-log storage for configuration mutations.
+- [x] Add uniqueness and isolation constraints.
+- [x] Create migrations.
 
 ## Deliverable
 
@@ -85,12 +85,12 @@ A normalized PostgreSQL schema for versioned agent profiles and their resources.
 
 ## Verification
 
-- [ ] Migrations apply cleanly.
-- [ ] Fresh test database can recreate the schema.
-- [ ] Schema constraints are tested.
-- [ ] Profile/version persistence tests pass.
-- [ ] Skill package persistence tests cover `SKILL.md`, supporting files, version, and stable identifier.
-- [ ] Cross-project isolation tests pass.
+- [x] Migrations apply cleanly.
+- [x] Fresh test database can recreate the schema.
+- [x] Schema constraints are tested.
+- [x] Profile/version persistence tests pass.
+- [x] Skill package persistence tests cover `SKILL.md`, supporting files, version, and stable identifier.
+- [x] Cross-project isolation tests pass.
 
 ---
 
