@@ -135,41 +135,184 @@ Once published, any change to a version's contents requires a new version
 (via a new draft). `skill_versions` may also be explicitly deprecated (a
 `deprecated` flag on the parent `skills` row is independent of version state).
 
+## Typical agent flow (canonical happy path)
+
+The most common call sequence for an agent that wants to set up a project
+end-to-end. The same sequence applies to human authors via a UI; it is
+optimised for being executable as a script with no branching.
+
+```text
+1.  POST   /v1/projects                              → projectId
+2.  POST   /v1/projects/{projectId}/models            → modelId     (one per provider)
+3.  POST   /v1/projects/{projectId}/libraries         → libraryId   (optional)
+4.  POST   /v1/projects/{projectId}/skills            → skillId
+5.  POST   /v1/projects/{projectId}/skills/{skillId}/versions
+                                                    → skillVersionId  (auto-draft)
+6.  PUT    /v1/projects/{projectId}/skills/{skillId}/versions/{skillVersionId}/files/{path}
+                                                    → 204 (one per supporting file)
+7.  POST   /v1/projects/{projectId}/skills/{skillId}/versions/{skillVersionId}/publish
+                                                    → 204 (seals the skill package)
+8.  POST   /v1/projects/{projectId}/profiles          → profileId
+9.  POST   /v1/projects/{projectId}/profiles/{profileId}/versions
+                                                    → versionId   (auto-draft, version=1)
+10. POST   /v1/projects/{projectId}/profiles/{profileId}/versions/{versionId}/models
+                                                    → 204
+11. POST   /v1/projects/{projectId}/profiles/{profileId}/versions/{versionId}/skills
+                                                    → 204
+12. POST   /v1/projects/{projectId}/profiles/{profileId}/versions/{versionId}/publish
+                                                    → 204  (seals the profile version)
+13. GET    /v1/projects/{projectId}/profiles/{profileId}@1     (Phase 5 — resolve)
+```
+
+To change anything in a published version: create a new draft (step 9 with
+`version=2`), repeat the junction calls for the changed refs, and publish.
+Never edit a published version directly — it is sealed by design.
+
 ## Tasks
 
-- [ ] Add `status` column (`draft` | `published`) to `profile_versions` and
-  `skill_versions` with a default of `draft`.
-- [ ] Add `published_at` timestamp column to `profile_versions` and
-  `skill_versions` (nullable; set on publish).
-- [ ] Define database triggers that seal a version's junction rows and
-  `skill_files` while the parent version is `published` (allow while
-  `draft`).
-- [ ] Add database triggers that allow a draft version row to be updated or
-  deleted (the existing immutability triggers only block the *published*
-  state).
-- [ ] Backfill existing version rows to `published` (the Phase 2 model had
-  no draft state; data already in the table is treated as published).
-- [ ] Implement project endpoints.
-- [ ] Implement profile creation.
-- [ ] Implement profile retrieval.
-- [ ] Implement profile update/version creation.
-- [ ] Implement version publish endpoint (transition `draft` → `published`).
-- [ ] Implement model/provider endpoints.
-- [ ] Implement library endpoints.
-- [ ] Implement skill endpoints.
-- [ ] Implement skill version creation/update/publish.
-- [ ] Implement skill retrieval by stable identifier/source and slug.
-- [ ] Implement skill package retrieval including `SKILL.md` and supporting
-  files.
-- [ ] Implement Markdown instruction endpoints.
-- [ ] Implement E2E test-definition endpoints.
-- [ ] Add Zod request/response validation.
-- [ ] Define stable API error codes and response shapes.
+Each task below is a single API endpoint. The **Suggested flow** line
+answers (a) when to call it, (b) what the one or two expected errors are,
+and (c) the next canonical call.
+
+- [ ] **Project endpoints.** `POST /v1/projects`, `GET /v1/projects/{projectId}`,
+      `GET /v1/projects?slug=...`, `DELETE /v1/projects/{projectId}`.
+      *Suggested flow*: call `POST /v1/projects` once at the start of setup
+      (step 1). If you receive `409 project_slug_taken`, the project already
+      exists — call `GET /v1/projects?slug=...` and reuse the returned id.
+      `DELETE` is rarely called; it cascades to every resource and audit row
+      gets `project_id` set to `NULL` (history preserved).
+
+- [ ] **Profile creation.** `POST /v1/projects/{projectId}/profiles`,
+      `GET /v1/projects/{projectId}/profiles/{profileId}`,
+      `GET /v1/projects/{projectId}/profiles?slug=...`.
+      *Suggested flow*: call `POST .../profiles` once per profile (step 8).
+      On `409 profile_slug_taken`, look up the existing id via the slug GET
+      and continue.
+
+- [ ] **Profile retrieval.** `GET /v1/projects/{projectId}/profiles/{profileId}`.
+      *Suggested flow*: use this to confirm the latest version number before
+      creating a new version; the response includes the highest published
+      version.
+
+- [ ] **Profile update / version creation.**
+      `POST /v1/projects/{projectId}/profiles/{profileId}/versions` (creates
+      a new draft version, version number is server-assigned, default
+      `version=last+1` if not specified).
+      `PATCH /v1/projects/{projectId}/profiles/{profileId}/versions/{versionId}`
+      (update notes on a draft).
+      *Suggested flow*: this is the "create v2" call after a published v1
+      needs changes. On `409 version_already_exists` (you tried to specify
+      the version number explicitly and it is taken), omit the version field
+      and let the server pick the next one.
+
+- [ ] **Version publish.**
+      `POST /v1/projects/{projectId}/profiles/{profileId}/versions/{versionId}/publish`.
+      *Suggested flow*: call this once the draft has every junction you want
+      (steps 10–11). If you receive `409 version_already_published`, the
+      version is sealed — you are looking at a stale draft id; `GET` the
+      profile to find the latest published version. If you receive
+      `409 version_has_no_resources`, you are trying to publish an empty
+      profile; add at least one model or skill junction first.
+
+- [ ] **Model / provider endpoints.** `POST /v1/projects/{projectId}/models`,
+      `GET /v1/projects/{projectId}/models/{modelId}`,
+      `GET /v1/projects/{projectId}/models?slug=...`.
+      *Suggested flow*: create the model once per project (step 2), then
+      reference it from any version junction (step 10). Reuse the same
+      model across versions.
+
+- [ ] **Library endpoints.** `POST /v1/projects/{projectId}/libraries`,
+      `GET /v1/projects/{projectId}/libraries/{libraryId}`,
+      `GET /v1/projects/{projectId}/libraries?slug=...`,
+      `POST /v1/.../profiles/{profileId}/versions/{versionId}/libraries`.
+      *Suggested flow*: create once (step 3), attach per version
+      (parallel to step 10).
+
+- [ ] **Skill endpoints.** `POST /v1/projects/{projectId}/skills`,
+      `GET /v1/projects/{projectId}/skills/{skillId}`,
+      `GET /v1/projects/{projectId}/skills?source=...&slug=...`
+      (the stable identifier lookup).
+      *Suggested flow*: create the skill identity once (step 4) and re-use
+      across versions. The stable identifier is `(source, slug)` — agents
+      that only know the source/slug can resolve to a skillId before
+      creating versions.
+
+- [ ] **Skill version creation / update / publish.**
+      `POST /v1/projects/{projectId}/skills/{skillId}/versions` (auto-draft),
+      `PUT /v1/.../skills/{skillId}/versions/{skillVersionId}/files/{path}`
+      (upsert one supporting file),
+      `DELETE /v1/.../skills/{skillId}/versions/{skillVersionId}/files/{path}`,
+      `POST /v1/.../skills/{skillId}/versions/{skillVersionId}/publish`.
+      *Suggested flow*: steps 5–7. Use `PUT` (idempotent) for files; do not
+      use `POST`. A skill version can be published without any files, but
+      agents should publish only when they have written the files they
+      intend to ship.
+
+- [ ] **Skill retrieval by stable identifier.**
+      `GET /v1/projects/{projectId}/skills?source=...&slug=...&version=...`.
+      *Suggested flow*: when an agent only knows `source` + `slug`, this
+      resolves to a `skillId` + a version. Default to the latest published
+      version; pin a specific version number for reproducibility.
+
+- [ ] **Skill package retrieval.**
+      `GET /v1/projects/{projectId}/skills/{skillId}/versions/{skillVersionId}`
+      (returns `SKILL.md` + file manifest),
+      `GET /v1/.../skills/{skillId}/versions/{skillVersionId}/files/{path}`
+      (returns the file content).
+      *Suggested flow*: this is the read path; pair it with the Phase 5
+      resolution response. Use this when an agent needs the full package
+      outside a profile (e.g. for a one-off skill).
+
+- [ ] **Markdown instruction endpoints.**
+      `POST /v1/projects/{projectId}/instructions`,
+      `GET /v1/projects/{projectId}/instructions/{instructionId}`,
+      `GET /v1/projects/{projectId}/instructions?slug=...`,
+      `POST /v1/.../profiles/{profileId}/versions/{versionId}/instructions`.
+      *Suggested flow*: create the instruction once per project, attach per
+      version. Same idempotency rules as libraries.
+
+- [ ] **E2E test-definition endpoints.**
+      `POST /v1/projects/{projectId}/e2e-tests`,
+      `GET /v1/projects/{projectId}/e2e-tests/{e2eId}`,
+      `GET /v1/projects/{projectId}/e2e-tests?slug=...`,
+      `POST /v1/.../profiles/{profileId}/versions/{versionId}/e2e-tests`.
+      *Suggested flow*: same shape as instructions. Validation of the
+      `E2E.md` body is defined in Phase 7; the API only stores the raw
+      markdown in Phase 3.
+
+- [ ] Add Zod request/response validation at the API boundary.
+- [ ] Define stable API error codes and response shapes (see the failure
+      recovery matrix at the end of this phase).
 - [ ] Add OpenAPI documentation.
 
 ## Deliverable
 
 A usable API for managing versioned agent profiles without direct database access.
+
+## Failure recovery matrix
+
+The most likely error codes an agent will encounter, paired with the next
+call. Anything not in this matrix is a bug; do not invent recovery paths
+in the client.
+
+| HTTP | Code                          | Likely cause                          | Next call to make                                            |
+|------|-------------------------------|---------------------------------------|--------------------------------------------------------------|
+| 400  | `validation_failed`           | Request body missing required field   | Fix the body and retry the same endpoint.                    |
+| 401  | `unauthenticated`             | Missing / expired credential          | Re-authenticate (Phase 4) and retry.                         |
+| 403  | `cross_project_access`        | Path projectId does not match token   | Stop. The token is for a different project; do not retry.    |
+| 403  | `forbidden`                   | Resource not authorized for this actor| Stop. Surface to the operator; do not retry.                 |
+| 404  | `project_not_found`           | Bad projectId                         | `GET /v1/projects?slug=...` to look up by slug.              |
+| 404  | `profile_not_found`           | Bad profileId                         | `GET /v1/projects/{projectId}/profiles?slug=...`.            |
+| 404  | `version_not_found`           | Bad versionId                         | `GET /v1/.../profiles/{profileId}` to list versions.         |
+| 404  | `resource_not_found`          | Bad modelId / libraryId / skillId     | `GET ...?slug=...` to look up by slug.                       |
+| 409  | `project_slug_taken`          | Slug already used                     | `GET /v1/projects?slug=...` and reuse the returned id.       |
+| 409  | `profile_slug_taken`          | Slug already used in this project     | `GET /v1/.../profiles?slug=...` and reuse.                   |
+| 409  | `resource_slug_taken`         | Slug already used in this project     | `GET ...?slug=...` to resolve; reuse the id.                 |
+| 409  | `version_already_exists`      | Explicit version number is taken      | Omit the version field; the server picks the next number.    |
+| 409  | `version_already_published`   | Publish on a non-draft version        | `GET /v1/.../profiles/{profileId}` to find the latest.       |
+| 409  | `version_has_no_resources`    | Publish on a draft with no junctions  | Add at least one junction (model/skill/library) and retry.   |
+| 422  | `invalid_status_transition`   | Flipping a published version to draft | Create a new version (POST .../versions) instead.             |
+| 5xx  | `internal_error`              | Server fault                          | Retry with exponential backoff up to 3 times; then surface.  |
 
 ## Verification
 
@@ -226,26 +369,95 @@ Humans can manage authorized projects, and GitHub Actions can authenticate throu
 
 ## Goal
 
-Resolve a profile into one deterministic, versioned configuration snapshot for an execution client.
+Resolve a profile into one deterministic, versioned configuration snapshot
+for an execution client.
+
+## Typical agent flow
+
+This is the read path that the GitHub Action (Phase 6) and any other
+execution client will use on every run. It is intentionally a single
+request with a single response — no choreography.
+
+```text
+1. GET   /v1/resolve/{projectId}/profiles/{slug}@{versionPin}
+                                              → resolved config snapshot
+```
+
+The `{versionPin}` is either a literal version number (`12`) or the literal
+`latest`. The response includes the resolved profile + version identity
+plus the full configuration the agent needs (model, libraries, skills as
+versioned packages, instructions, E2E contracts). No follow-up calls are
+required for normal execution.
+
+If the agent only has a skill's stable identifier (no profile context),
+it can use the Phase 3 skill retrieval endpoint instead.
 
 ## Tasks
 
-- [ ] Define profile-resolution semantics.
-- [ ] Implement pinned resolution such as `testing@12`.
-- [ ] Implement moving-channel resolution such as `testing@latest`.
-- [ ] Resolve model/provider configuration.
-- [ ] Resolve libraries.
-- [ ] Resolve skills as versioned packages.
-- [ ] Resolve Markdown instructions.
-- [ ] Resolve E2E test definitions.
-- [ ] Define the resolved-configuration response schema.
-- [ ] Include profile/version identity in the response.
-- [ ] Ensure identical inputs and version produce identical resolved configuration.
-- [ ] Exclude provider credentials from resolved profiles.
+Each task below is a single API surface. The **Suggested flow** line
+answers (a) when to call it, (b) what the one or two expected errors are,
+and (c) the next call in the canonical path.
+
+- [ ] **Define profile-resolution semantics.** A `slug@versionPin` resolves
+      to one immutable snapshot. `latest` resolves to the highest
+      *published* version number. A draft is not addressable by `latest`
+      and cannot be resolved — drafts are authoring state, not runtime
+      state.
+      *Suggested flow*: pin to a number for reproducible runs; use
+      `latest` for the moving channel (rolling upgrade).
+
+- [ ] **Pinned resolution.** `GET /v1/resolve/{projectId}/profiles/{slug}@{versionNumber}`.
+      *Suggested flow*: the GitHub Action pins to a literal version by
+      default. On `404 version_not_found` (the version number does not
+      exist), the action fails closed — do not fall back to `latest`
+      silently.
+
+- [ ] **Moving-channel resolution.** `GET /v1/resolve/{projectId}/profiles/{slug}@latest`.
+      *Suggested flow*: human-driven local runs use `@latest`. Same
+      `404` semantics if there is no published version.
+
+- [ ] **Resolve model / provider configuration.** Included in the
+      resolved response; no separate call.
+- [ ] **Resolve libraries.** Same — included in the response.
+- [ ] **Resolve skills as versioned packages.** Each skill in the response
+      includes `SKILL.md` content and the file manifest, so the agent can
+      materialize the package without further API calls.
+- [ ] **Resolve Markdown instructions.** Inlined as `content` in the
+      response.
+- [ ] **Resolve E2E test definitions.** Inlined as `definition` in the
+      response.
+- [ ] **Define the resolved-configuration response schema.** Versioned,
+      includes `profileId`, `slug`, `version`, `versionId`, `publishedAt`,
+      and the resolved resources. Stable across releases; additions are
+      additive only.
+- [ ] **Include profile / version identity in the response.** The caller
+      echoes it back in logs and audit trails; this is the
+      reproducibility anchor.
+- [ ] **Ensure identical inputs and version produce identical resolved
+      configuration.** The response is a pure function of the published
+      version row. No timestamps from the resolution call leak into
+      payload content.
+- [ ] **Exclude provider credentials from resolved profiles.** Resolution
+      returns model identity, never API keys. The execution client uses
+      its own secret store; Phase 8 will define the integration.
 
 ## Deliverable
 
-One authenticated API request resolves a profile into the complete configuration required by an execution client.
+One authenticated API request resolves a profile into the complete
+configuration required by an execution client.
+
+## Failure recovery matrix
+
+| HTTP | Code                          | Likely cause                          | Next call to make                                            |
+|------|-------------------------------|---------------------------------------|--------------------------------------------------------------|
+| 400  | `invalid_version_pin`         | `@latest` or `@12` is malformed       | Fix the URL; do not retry.                                   |
+| 401  | `unauthenticated`             | Missing / expired credential          | Re-authenticate (Phase 4) and retry.                         |
+| 403  | `cross_project_access`        | Path projectId does not match token   | Stop. The token is for a different project.                  |
+| 404  | `profile_not_found`           | Unknown slug                          | `GET /v1/projects/{projectId}/profiles?slug=...`.            |
+| 404  | `version_not_found`           | Pinned number does not exist          | Fail closed. Do not fall back to `@latest`.                  |
+| 404  | `no_published_version`        | `@latest` requested before publish    | `POST .../versions` to create and publish a version.         |
+| 409  | `profile_has_no_resources`    | Published version has no junctions    | `POST .../versions` to create a new draft with resources.    |
+| 5xx  | `internal_error`              | Server fault                          | Retry with exponential backoff up to 3 times; then surface.  |
 
 ## Verification
 
