@@ -4,11 +4,11 @@
 -- 1) Project purges now cascade through the immutable versioning tables.
 --    The composite FKs below change to ON DELETE CASCADE and the immutability
 --    triggers become depth-aware: a row delete/update that reaches these
---    tables as part of an outer statement cascade (pg_trigger_depth() > 0) is
---    allowed, while direct client UPDATE/DELETE still raises. This lets
---    `DELETE FROM projects` remove profile versions, skill versions, their
---    supporting files, and their relationships together, with audit history
---    preserved via the existing ON DELETE SET NULL.
+--    tables as part of an outer statement cascade (pg_trigger_depth() > 1)
+--    is allowed, while direct client UPDATE/DELETE (depth = 1) still raises.
+--    This lets `DELETE FROM projects` remove profile versions, skill versions,
+--    their supporting files, and their relationships together, with audit
+--    history preserved via the existing ON DELETE SET NULL.
 ALTER TABLE "profile_versions" DROP CONSTRAINT "profile_versions_profile_project_fk";--> statement-breakpoint
 ALTER TABLE "profile_versions" ADD CONSTRAINT "profile_versions_profile_project_fk" FOREIGN KEY ("profile_id","project_id") REFERENCES "public"."profiles"("id","project_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "skill_versions" DROP CONSTRAINT "skill_versions_skill_project_fk";--> statement-breakpoint

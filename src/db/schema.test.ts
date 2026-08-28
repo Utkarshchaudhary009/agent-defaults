@@ -58,6 +58,7 @@ let db: Database;
 // connection with the maintenance flag set once.
 let cleanup: postgres.Sql;
 
+/** Insert a project with a synthetic name and return the persisted row. */
 async function createProject(slug: string): Promise<Project> {
   const rows = await db
     .insert(projects)
@@ -67,6 +68,7 @@ async function createProject(slug: string): Promise<Project> {
   return rows[0];
 }
 
+/** Insert a profile that belongs to `projectId` and return the persisted row. */
 async function createProfile(
   projectId: string,
   slug: string,
@@ -79,6 +81,7 @@ async function createProfile(
   return rows[0];
 }
 
+/** Insert an immutable profile version row and return the persisted row. */
 async function createProfileVersion(
   profileId: string,
   projectId: string,

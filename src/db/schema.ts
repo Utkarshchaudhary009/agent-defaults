@@ -334,6 +334,13 @@ export const e2eTests = pgTable(
 // profile version can only ever reference resources of its own project.
 // ---------------------------------------------------------------------------
 
+/**
+ * Shared constraints for the five profile-version ↔ resource junction
+ * tables: a composite primary key over the (version, resource) pair plus
+ * composite foreign keys on both sides that include `project_id` so a
+ * junction row can only ever reference a profile version and a resource
+ * from the same project.
+ */
 function junctionExtras(
   t: { profileVersionId: AnyPgColumn; projectId: AnyPgColumn },
   resourceId: AnyPgColumn,
